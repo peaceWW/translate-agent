@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+backend/data/
+*.pdf
+
+# Node
+node_modules/
+frontend/dist/
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.log
+
+# Local runtime (pid/logs from manage scripts)
+.runtime/

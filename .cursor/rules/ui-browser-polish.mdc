@@ -1,0 +1,16 @@
+﻿---
+description: 修样式/UI 时必须开浏览器校验评估再修改
+alwaysApply: false
+globs: frontend/**/*.{css,tsx,jsx,vue,html,scss}
+---
+
+# UI 样式修改必须浏览器复验
+
+当用户要求修样式、改布局、打磨 UI，或编辑本规则匹配的前端视觉相关文件时：
+
+1. 打开浏览器访问对应本地页面
+2. 截图/快照校验并评估问题
+3. 再修改代码
+4. 刷新后再次校验
+
+不要只改 CSS/组件就结束。详细流程遵循个人技能 `ui-browser-polish`。

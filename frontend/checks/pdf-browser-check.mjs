@@ -1,0 +1,42 @@
+import { createRequire } from 'node:module'
+import assert from 'node:assert/strict'
+const require=createRequire('C:/Users/wuzhiyuan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/package.json')
+const {chromium}=require('playwright')
+const browser=await chromium.launch({headless:true,channel:'msedge'})
+const page=await browser.newPage({viewport:{width:1800,height:1200}})
+const errors=[]
+page.on('pageerror',e=>errors.push(e.message))
+const docId='fa7b729f2a344de3a23c8e5cac569315'
+const origin=process.env.APP_URL || 'http://127.0.0.1:5174'
+if(process.argv.includes('--rebuild')) {
+  const response=await page.request.post(`${origin}/api/documents/${docId}/rebuild-layout`,{timeout:120000})
+  assert.equal(response.ok(),true,await response.text())
+  const data=await response.json()
+  assert.equal(data.layout_report.status,'passed')
+  console.log('Real document rebuilt:',JSON.stringify(data.layout_report))
+}
+await page.goto(`${origin}/translate/${docId}`)
+const image=page.getByAltText('译文 PDF 第 1 页',{exact:true})
+await image.waitFor()
+await page.waitForFunction(()=>Array.from(document.querySelectorAll('.pdf-page-pair:first-child img')).every(i=>i.complete&&i.naturalWidth>0))
+assert.equal(await page.locator('.pdf-page-pair').count(),15)
+await page.screenshot({path:'frontend/checks/pdf-bilingual.png'})
+await page.getByLabel('页码').selectOption('6')
+await page.getByAltText('译文 PDF 第 6 页',{exact:true}).scrollIntoViewIfNeeded()
+await page.waitForFunction(()=>{const i=document.querySelector('img[alt="译文 PDF 第 6 页"]');return i?.complete&&i.naturalWidth>0})
+await page.screenshot({path:'frontend/checks/pdf-formulas.png'})
+await page.getByRole('button',{name:'译文',exact:true}).click()
+assert.equal(await page.locator('img[alt^="原文 PDF"]').count(),0)
+await page.getByLabel('缩放').selectOption('150')
+assert.equal(await page.locator('.pdf-pages').evaluate(el=>el.style.width),'150%')
+await page.getByRole('button',{name:'双语对照',exact:true}).click()
+await page.setViewportSize({width:390,height:844})
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+const download=await page.request.get(`${origin}/api/documents/${docId}/translated.pdf`)
+assert.equal(download.ok(),true)
+assert.equal(download.headers()['content-type'],'application/pdf')
+const bad=await page.request.get(`${origin}/api/documents/${docId}/pages/999.png`)
+assert.equal(bad.status(),404)
+assert.deepEqual(errors,[])
+await browser.close()
+console.log('Passed: actual 15-page PDF, paired pages, formulas, zoom, mobile containment, PDF download, invalid page handling, no browser errors.')
