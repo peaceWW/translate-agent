@@ -56,6 +56,9 @@ export type LLMConfig = {
   base_url: string
   max_tokens: number
   system_prompt: string
+  translation_model: string
+  translation_base_url: string
+  translation_api_key: string
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

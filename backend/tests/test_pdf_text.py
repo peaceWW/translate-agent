@@ -74,6 +74,7 @@ class PDFTextTests(unittest.TestCase):
                   block('eqnum', '(6)', (500,100,540,118))]
         PDFParserService._protect_formula_fragments(blocks)
         PDFParserService._lock_display_equations(blocks)
+        PDFParserService._tag_inline_math(blocks)
         self.assertFalse(blocks[1].translate)
         self.assertTrue(blocks[2].translate)
         self.assertFalse(blocks[3].translate)
@@ -81,10 +82,45 @@ class PDFTextTests(unittest.TestCase):
         self.assertFalse(blocks[5].translate)
         self.assertFalse(blocks[6].translate)
         self.assertEqual(blocks[6].type, BlockType.FORMULA)
+        # Lone ω next to a display equation is promoted to display LOCK.
+        self.assertTrue(blocks[6].meta.get('display_math') or blocks[6].meta.get('inline_math') is not None)
         self.assertFalse(blocks[7].translate)
         self.assertEqual(blocks[7].type, BlockType.FORMULA)
+        self.assertFalse(blocks[7].meta.get('inline_math'))  # multi-line display
         self.assertFalse(blocks[8].translate)
         self.assertEqual(blocks[8].type, BlockType.FORMULA)
+        self.assertFalse(blocks[8].meta.get('inline_math'))  # equation number → display
+
+    def test_short_radical_scrap_tagged_inline(self):
+        blocks = [
+            LayoutBlock(
+                source_id='p', page=1, type=BlockType.PARAGRAPH,
+                bbox=BBox(x0=50, y0=100, x1=250, y1=140),
+                text='Since gm ∝', translate=True,
+                meta={'page_width': 612},
+            ),
+            LayoutBlock(
+                source_id='r', page=1, type=BlockType.PARAGRAPH,
+                bbox=BBox(x0=180, y0=125, x1=195, y1=140),
+                text='√', translate=True,
+                meta={'page_width': 612},
+            ),
+            LayoutBlock(
+                source_id='eq', page=1, type=BlockType.FORMULA,
+                bbox=BBox(x0=350, y0=100, x1=550, y1=130),
+                text='i11(t)=Ipd...(14)', translate=False, protected=True,
+                meta={'page_width': 612},
+            ),
+        ]
+        PDFParserService._protect_formula_fragments(blocks)
+        PDFParserService._lock_display_equations(blocks)
+        PDFParserService._tag_inline_math(blocks)
+        radical = next(b for b in blocks if b.source_id == 'r')
+        display = next(b for b in blocks if b.source_id == 'eq')
+        self.assertEqual(radical.type, BlockType.FORMULA)
+        self.assertTrue(radical.meta.get('inline_math'))
+        self.assertFalse(display.meta.get('inline_math'))
+        self.assertTrue(display.meta.get('display_math'))
 
 
 if __name__ == '__main__':

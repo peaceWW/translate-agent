@@ -181,7 +181,12 @@ def looks_like_formula(text: str) -> bool:
             w for w in re.findall(r'[A-Za-z]{4,}', text)
             if w.lower() not in _MATH_WORDS
         ]
-        if len(long_words) <= 2:
+        if re.search(r'[=≈]', text):
+            # Real equations may include a couple of unit/name words.
+            if len(long_words) <= 2:
+                return True
+        elif not long_words:
+            # Trailing ∝ alone is only formula when there is no English prose.
             return True
     if FORMULA_HINT_PATTERN.search(text):
         alpha_ratio = sum(c.isalpha() for c in text) / max(len(text), 1)

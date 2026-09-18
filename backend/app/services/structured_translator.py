@@ -116,7 +116,7 @@ class StructuredTranslator:
         )
         if layout_hint:
             prompt += f"\n排版约束：{layout_hint}"
-        cfg = config or self.llm.load_config()
+        cfg = (config or self.llm.load_config()).effective_translation_config()
         raw = await self.llm.chat(prompt, config=cfg, system_prompt=STRUCTURED_SYSTEM)
         mapping = _parse_translations(raw)
         segments = _apply_translations(unit, mapping)

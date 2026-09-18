@@ -45,6 +45,7 @@ class SemanticBuilderTests(unittest.TestCase):
                 bbox=BBox(x0=50, y0=142, x1=120, y1=160),
                 text='√Id',
                 translate=False, protected=True,
+                meta={'inline_math': True},
             ),
             LayoutBlock(
                 source_id='c', page=5, type=BlockType.PARAGRAPH,
@@ -56,8 +57,49 @@ class SemanticBuilderTests(unittest.TestCase):
         units = build_semantic_units(blocks)
         self.assertEqual(len(units), 1)
         self.assertEqual(units[0].primary_source_id, 'a')
-        self.assertEqual(units[0].absorb_source_ids, ['c'])
+        self.assertIn('c', units[0].absorb_source_ids)
+        self.assertIn('f', units[0].absorb_source_ids)
         self.assertTrue(any(s.type == SegmentType.MATH and '√' in s.source for s in units[0].segments))
+
+    def test_orphan_radical_stitches_skips_other_column_eq(self):
+        """Page-5 pattern: left √ half-sentence, right (14), then 'I d, ...'."""
+        blocks = [
+            LayoutBlock(
+                source_id='b_5_10', page=5, type=BlockType.PARAGRAPH,
+                bbox=BBox(x0=48.96, y0=668.18, x1=300.13, y1=706.23),
+                text=(
+                    'For a given gain, if the bandwidth is halved from 0.7×\n'
+                    'data rate to 0.35× data rate, then R<sub>d</sub> can be doubled and\n'
+                    'gm can be halved. Since gm ∝\n√'
+                ),
+                translate=True,
+            ),
+            LayoutBlock(
+                source_id='b_5_27', page=5, type=BlockType.FORMULA,
+                bbox=BBox(x0=357.24, y0=669.66, x1=563.12, y1=684.99),
+                text='i<sub>11</sub>(t) = I<sub>pd</sub> ... (14)',
+                translate=False, protected=True,
+                meta={'display_math': True, 'inline_math': False},
+            ),
+            LayoutBlock(
+                source_id='b_5_12', page=5, type=BlockType.PARAGRAPH,
+                bbox=BBox(x0=48.96, y0=691.96, x1=300.47, y1=754.11),
+                text=(
+                    'I d, the power is reduced\n'
+                    'to 1/4 of that of a conventional receiver.'
+                ),
+                translate=True,
+            ),
+        ]
+        units = build_semantic_units(blocks)
+        self.assertEqual(len(units), 1)
+        unit = units[0]
+        self.assertEqual(unit.primary_source_id, 'b_5_10')
+        self.assertEqual(unit.absorb_source_ids, ['b_5_12'])
+        self.assertNotIn('b_5_27', unit.member_source_ids)
+        assembled = assemble_segments(unit.segments)
+        self.assertNotIn('(14)', assembled)
+        self.assertIn('√I_d', assembled)
 
 
 class StructuredTranslatorTests(unittest.TestCase):

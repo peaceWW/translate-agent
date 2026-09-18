@@ -2,20 +2,32 @@ import { useEffect, useState } from 'react'
 import { api, type LLMConfig } from '../api'
 
 const defaultConfig: LLMConfig = {
-  provider: 'openai',
-  model: 'gpt-4o',
+  provider: 'deepseek',
+  model: 'deepseek-chat',
   api_key: '',
-  base_url: 'https://api.openai.com/v1',
+  base_url: 'https://api.deepseek.com/v1',
   max_tokens: 4096,
   system_prompt:
     '你是一位专业的学术论文翻译助手。请准确翻译学术内容，严格保留公式、数字、单位、引用编号、图表编号与专有名词。',
+  translation_model: '',
+  translation_base_url: '',
+  translation_api_key: '',
 }
 
 const presets = [
-  { label: 'OpenAI GPT-4o', provider: 'openai', model: 'gpt-4o', base_url: 'https://api.openai.com/v1' },
-  { label: 'OpenAI GPT-4.1', provider: 'openai', model: 'gpt-4.1', base_url: 'https://api.openai.com/v1' },
-  { label: '通义千问 (兼容)', provider: 'qwen', model: 'qwen-plus', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: 'DeepSeek', provider: 'deepseek', model: 'deepseek-chat', base_url: 'https://api.deepseek.com/v1' },
+  { label: '智谱 GLM-4', provider: 'zhipu', model: 'glm-4-plus', base_url: 'https://open.bigmodel.cn/api/paas/v4' },
+  { label: 'Kimi (Moonshot)', provider: 'moonshot', model: 'moonshot-v1-8k', base_url: 'https://api.moonshot.cn/v1' },
+  { label: '通义千问', provider: 'qwen', model: 'qwen-plus', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   { label: '自定义 OpenAI 兼容', provider: 'custom', model: 'custom-model', base_url: 'http://localhost:11434/v1' },
+]
+
+const translationPresets = [
+  { label: '与推理模型相同', translation_model: '', translation_base_url: '' },
+  { label: '通义千问 MT', translation_model: 'qwen-mt-plus', translation_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: 'DeepSeek', translation_model: 'deepseek-chat', translation_base_url: 'https://api.deepseek.com/v1' },
+  { label: '智谱 GLM-4', translation_model: 'glm-4-plus', translation_base_url: 'https://open.bigmodel.cn/api/paas/v4' },
+  { label: 'Kimi', translation_model: 'moonshot-v1-8k', translation_base_url: 'https://api.moonshot.cn/v1' },
 ]
 
 export default function ModelsPage() {
@@ -67,7 +79,7 @@ export default function ModelsPage() {
       <header className="page-header">
         <div>
           <h1>模型配置</h1>
-          <p className="muted">支持任意 OpenAI 兼容接口：GPT / Claude 网关 / Qwen / 本地模型</p>
+          <p className="muted">支持 DeepSeek、智谱 GLM、Kimi、通义千问等国产模型，及任意 OpenAI 兼容接口</p>
         </div>
       </header>
 
@@ -131,6 +143,58 @@ export default function ModelsPage() {
               onChange={(e) => setConfig({ ...config, system_prompt: e.target.value })}
             />
           </label>
+        </div>
+
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
+          <h3 style={{ margin: '0 0 4px' }}>翻译专用模型</h3>
+          <p className="muted small" style={{ margin: '0 0 12px' }}>
+            专用翻译模型（如 qwen-mt-plus）针对翻译优化，速度更快、准确度更高。页面修复和文档问答仍使用上方的推理模型。留空则与推理模型相同。
+          </p>
+          <label>快捷预设</label>
+          <div className="preset-row">
+            {translationPresets.map((p) => (
+              <button
+                key={p.label}
+                className="btn ghost"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    translation_model: p.translation_model,
+                    translation_base_url: p.translation_base_url,
+                  }))
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="form-grid">
+            <label>
+              翻译模型名称
+              <input
+                value={config.translation_model}
+                onChange={(e) => setConfig({ ...config, translation_model: e.target.value })}
+                placeholder="留空则使用推理模型"
+              />
+            </label>
+            <label>
+              翻译模型 API Base URL
+              <input
+                value={config.translation_base_url}
+                onChange={(e) => setConfig({ ...config, translation_base_url: e.target.value })}
+                placeholder="留空则使用推理模型地址"
+              />
+            </label>
+            <label className="full">
+              翻译模型 API Key
+              <input
+                type="password"
+                value={config.translation_api_key}
+                onChange={(e) => setConfig({ ...config, translation_api_key: e.target.value })}
+                placeholder="留空则使用推理模型 Key"
+              />
+            </label>
+          </div>
         </div>
 
         <div className="header-actions">

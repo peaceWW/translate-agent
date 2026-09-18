@@ -58,6 +58,20 @@ _INLINE_MATH_PATTERN = re.compile(
     re.S,
 )
 
+_TRAILING_ORPHAN_RADICAL = re.compile(r'√\s*$')
+_TRAILING_OPEN_REL = re.compile(r'[∝≈=≤≥≠±×·⋅]\s*$')
+_LEADING_RADICAND = re.compile(
+    r'^\s*(?:'
+    r'I\s*d\b'
+    r'|I_d\b'
+    r'|I<sub>d</sub>'
+    r'|[A-Za-zα-ωΑ-Ω](?:_[A-Za-z0-9]{1,6}|<(?:sub|sup)>[^<]{1,12}</(?:sub|sup)>)'
+    r')\s*',
+    re.I,
+)
+_EQ_NUMBER = re.compile(r'\(\d{1,3}[a-z]?\)\s*$')
+_FLOW_TYPES = {BlockType.PARAGRAPH, BlockType.CAPTION, BlockType.ABSTRACT}
+
 
 def _atom_patterns() -> list[tuple[SegmentType, re.Pattern[str]]]:
     return [
@@ -105,7 +119,6 @@ def split_into_segments(text: str, *, id_prefix: str = "S") -> list[TextSegment]
         chunk = text[cursor:]
         if chunk:
             segments.append(TextSegment(id=f"{id_prefix}{index}", type=SegmentType.TEXT, source=chunk))
-    # Merge adjacent TEXT segments
     merged: list[TextSegment] = []
     for seg in segments:
         if merged and merged[-1].type == SegmentType.TEXT and seg.type == SegmentType.TEXT:
@@ -133,11 +146,28 @@ def _same_column(a: LayoutBlock, b: LayoutBlock, *, tol: float = 36.0) -> bool:
     return abs(a.bbox.x0 - b.bbox.x0) < tol and abs(a.bbox.x1 - b.bbox.x1) < tol * 1.5
 
 
+def _in_column_band(column: LayoutBlock, other: LayoutBlock, *, tol: float = 36.0) -> bool:
+    """True if ``other`` sits inside ``column``'s horizontal band (scraps may be narrower)."""
+    if _same_column(column, other, tol=tol):
+        return True
+    return (
+        other.bbox.x0 >= column.bbox.x0 - tol
+        and other.bbox.x1 <= column.bbox.x1 + tol
+    )
+
+
 def _ends_incomplete(text: str) -> bool:
     plain = visible_prose(text).rstrip()
     if not plain:
         return False
     return not plain.endswith((".", "!", "?", "。", "！", "？", ":", "：", ";"))
+
+
+def _ends_orphan_math(text: str) -> bool:
+    plain = visible_prose(text).rstrip()
+    if not plain:
+        return False
+    return bool(_TRAILING_ORPHAN_RADICAL.search(plain) or _TRAILING_OPEN_REL.search(plain))
 
 
 def _starts_lowercase_continuation(text: str) -> bool:
@@ -148,67 +178,192 @@ def _starts_lowercase_continuation(text: str) -> bool:
     return ch.islower() or ch in "，,;；)）"
 
 
-def build_semantic_units(page_blocks: list[LayoutBlock]) -> list[SemanticUnit]:
-    """Build reading-order semantic units for one page.
+def _is_display_equation(block: LayoutBlock) -> bool:
+    if block.type != BlockType.FORMULA:
+        return False
+    if block.meta.get('display_math'):
+        return True
+    if block.meta.get('inline_math'):
+        return False
+    plain = visible_prose(block.text)
+    if _EQ_NUMBER.search(re.sub(r'\s+', ' ', plain).strip()):
+        return True
+    width = block.bbox.x1 - block.bbox.x0
+    height = block.bbox.y1 - block.bbox.y0
+    if width > 140 and len(plain) > 24:
+        return True
+    if height > 28 and len(plain) > 16:
+        return True
+    return False
 
-    Display formulas stay LOCK anchors. Adjacent FLOW prose interrupted by a
-    short formula scrap can be merged into one unit so the sentence is translated whole.
+
+def _is_inline_formula_scrap(block: LayoutBlock) -> bool:
+    if block.type != BlockType.FORMULA or block.translate:
+        return False
+    if _is_display_equation(block):
+        return False
+    if block.meta.get('inline_math'):
+        return True
+    plain = visible_prose(block.text)
+    return len(plain) < 64 and (block.bbox.y1 - block.bbox.y0) < 28
+
+
+def _normalize_radicand(token: str) -> str:
+    t = re.sub(r'\s+', '', visible_prose(token).strip())
+    t = t.replace('I<sub>d</sub>', 'I_d')
+    if re.fullmatch(r'I_?d', t, re.I):
+        return 'I_d'
+    return t
+
+
+def _peel_orphan_radical(a_text: str, c_text: str) -> tuple[str, str, str] | None:
+    """If A ends with √ and C starts with a radicand scrap, return (a_core, math, c_rest)."""
+    if not _TRAILING_ORPHAN_RADICAL.search(visible_prose(a_text).rstrip()):
+        return None
+    match = _LEADING_RADICAND.match(c_text)
+    if not match:
+        plain = visible_prose(c_text)
+        match = _LEADING_RADICAND.match(plain)
+        if not match:
+            return None
+        radicand = _normalize_radicand(match.group(0))
+        rest = plain[match.end():]
+        a_core = _TRAILING_ORPHAN_RADICAL.sub('', a_text).rstrip()
+        return a_core, f'√{radicand}', rest
+    radicand = _normalize_radicand(match.group(0))
+    rest = c_text[match.end():]
+    a_core = _TRAILING_ORPHAN_RADICAL.sub('', a_text).rstrip()
+    return a_core, f'√{radicand}', rest
+
+
+def _find_same_column_merge(
+    ordered: list[LayoutBlock],
+    start: int,
+    block: LayoutBlock,
+) -> tuple[int, LayoutBlock | None] | None:
+    """Find next same-column FLOW continuation, skipping other columns.
+
+    Other-column blocks (including display equations) are skipped, never absorbed.
+    Same-column display equations / figures act as hard barriers.
+    """
+    scrap: LayoutBlock | None = None
+    for k in range(start, len(ordered)):
+        cand = ordered[k]
+        if not _in_column_band(block, cand):
+            continue
+        if not cand.translate and cand.type not in {BlockType.FORMULA}:
+            return None
+        if cand.type == BlockType.FORMULA and not cand.translate:
+            if _is_display_equation(cand):
+                return None
+            if scrap is None and _is_inline_formula_scrap(cand):
+                scrap = cand
+                continue
+            return None
+        if cand.translate and cand.type in _FLOW_TYPES:
+            if cand.bbox.y0 - block.bbox.y1 > 40 and scrap is None:
+                return None
+            if scrap is not None and cand.bbox.y0 - scrap.bbox.y1 > 40:
+                return None
+            if abs(cand.bbox.x0 - block.bbox.x0) > 48:
+                return None
+            return k, scrap
+        return None
+    return None
+
+
+def _should_merge(block: LayoutBlock, cont: LayoutBlock, scrap: LayoutBlock | None) -> bool:
+    if not _ends_incomplete(block.text) and not _ends_orphan_math(block.text):
+        return False
+    if _ends_orphan_math(block.text):
+        return True
+    if scrap is not None:
+        return (
+            _starts_lowercase_continuation(cont.text)
+            or len(visible_prose(scrap.text)) < 64
+        )
+    return _starts_lowercase_continuation(cont.text) or bool(
+        _LEADING_RADICAND.match(cont.text) or _LEADING_RADICAND.match(visible_prose(cont.text))
+    )
+
+
+def _build_merged_segments(
+    unit_index: int,
+    block: LayoutBlock,
+    cont: LayoutBlock,
+    scrap: LayoutBlock | None,
+) -> tuple[list[TextSegment], str]:
+    peeled = _peel_orphan_radical(block.text, cont.text)
+    if peeled is not None and scrap is None:
+        a_core, math_src, c_rest = peeled
+        segs = split_into_segments(a_core, id_prefix=f"U{unit_index}A")
+        segs.append(TextSegment(id=f"U{unit_index}M0", type=SegmentType.MATH, source=math_src))
+        if c_rest.strip():
+            segs.extend(split_into_segments(c_rest, id_prefix=f"U{unit_index}B"))
+        return segs, block.text + "\n" + cont.text
+
+    segs = split_into_segments(block.text, id_prefix=f"U{unit_index}A")
+    if scrap is not None:
+        segs.append(TextSegment(id=f"U{unit_index}M0", type=SegmentType.MATH, source=scrap.text))
+    segs.extend(split_into_segments(cont.text, id_prefix=f"U{unit_index}B"))
+    parts = [block.text]
+    if scrap is not None:
+        parts.append(scrap.text)
+    parts.append(cont.text)
+    return segs, "\n".join(parts)
+
+
+def build_semantic_units(page_blocks: list[LayoutBlock]) -> list[SemanticUnit]:
+    """Build reading-order semantic units for one page (Step B).
+
+    - Display formulas stay LOCK anchors (never merged into prose).
+    - Inline formula scraps and mid-expression splits (e.g. trailing √ / leading Id)
+      are merged into one unit so the sentence is translated whole.
+    - Other-column blocks are skipped and never inserted as MATH.
     """
     ordered = sorted(page_blocks, key=lambda b: (b.bbox.y0, b.bbox.x0))
     units: list[SemanticUnit] = []
+    consumed: set[str] = set()
     i = 0
     unit_index = 0
     while i < len(ordered):
         block = ordered[i]
-        if not block.translate:
+        if block.source_id in consumed or not block.translate:
             i += 1
             continue
 
-        members = [block]
-        absorb: list[str] = []
-        j = i + 1
-        # Merge across a single nearby formula scrap into the next prose block.
-        if (
-            j + 1 < len(ordered)
-            and _ends_incomplete(block.text)
-            and ordered[j].type == BlockType.FORMULA
-            and not ordered[j].translate
-            and ordered[j + 1].translate
-            and ordered[j + 1].type in {BlockType.PARAGRAPH, BlockType.CAPTION, BlockType.ABSTRACT}
-            and _same_column(block, ordered[j + 1])
-            and ordered[j].bbox.y0 - block.bbox.y1 < 28
-            and ordered[j + 1].bbox.y0 - ordered[j].bbox.y1 < 28
-            and (
-                _starts_lowercase_continuation(ordered[j + 1].text)
-                or len(visible_prose(ordered[j].text)) < 64
-            )
-        ):
-            formula = ordered[j]
-            cont = ordered[j + 1]
-            members = [block, cont]
-            absorb = [cont.source_id]
-            # Represent as: prose0 + MATH + prose1
-            segs = split_into_segments(block.text, id_prefix=f"U{unit_index}A")
-            math_id = f"U{unit_index}M0"
-            segs.append(TextSegment(id=math_id, type=SegmentType.MATH, source=formula.text))
-            segs.extend(split_into_segments(cont.text, id_prefix=f"U{unit_index}B"))
-            source_text = block.text + "\n" + formula.text + "\n" + cont.text
-            units.append(SemanticUnit(
-                unit_id=f"unit_{block.page}_{unit_index}",
-                page=block.page,
-                primary_source_id=block.source_id,
-                member_source_ids=[m.source_id for m in members] + [formula.source_id],
-                absorb_source_ids=absorb,
-                segments=segs,
-                source_text=source_text,
-            ))
-            unit_index += 1
-            i = j + 2
-            continue
+        merge = _find_same_column_merge(ordered, i + 1, block)
+        if merge is not None:
+            cont_idx, scrap = merge
+            cont = ordered[cont_idx]
+            if cont.source_id not in consumed and _should_merge(block, cont, scrap):
+                segs, source_text = _build_merged_segments(unit_index, block, cont, scrap)
+                absorb = [cont.source_id]
+                member_ids = [block.source_id, cont.source_id]
+                if scrap is not None:
+                    member_ids.append(scrap.source_id)
+                    absorb.append(scrap.source_id)
+                units.append(SemanticUnit(
+                    unit_id=f"unit_{block.page}_{unit_index}",
+                    page=block.page,
+                    primary_source_id=block.source_id,
+                    member_source_ids=member_ids,
+                    absorb_source_ids=absorb,
+                    segments=segs,
+                    source_text=source_text,
+                ))
+                consumed.add(block.source_id)
+                consumed.add(cont.source_id)
+                if scrap is not None:
+                    consumed.add(scrap.source_id)
+                unit_index += 1
+                i += 1
+                continue
 
         segs = split_into_segments(block.text, id_prefix=f"U{unit_index}S")
-        # Pure formula-like prose that slipped through should still be one MATH segment.
-        if looks_like_formula(visible_prose(block.text)) and not any(s.type == SegmentType.TEXT and s.source.strip() for s in segs):
+        if looks_like_formula(visible_prose(block.text)) and not any(
+            s.type == SegmentType.TEXT and s.source.strip() for s in segs
+        ):
             segs = [TextSegment(id=f"U{unit_index}M", type=SegmentType.MATH, source=block.text)]
         units.append(SemanticUnit(
             unit_id=f"unit_{block.page}_{unit_index}",
@@ -219,6 +374,7 @@ def build_semantic_units(page_blocks: list[LayoutBlock]) -> list[SemanticUnit]:
             segments=segs,
             source_text=block.text,
         ))
+        consumed.add(block.source_id)
         unit_index += 1
         i += 1
     return units

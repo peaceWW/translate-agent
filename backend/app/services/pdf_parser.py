@@ -132,6 +132,7 @@ class PDFParserService:
         doc.close()
         self._protect_formula_fragments(blocks)
         self._lock_display_equations(blocks)
+        self._tag_inline_math(blocks)
         # Reading order: page, then top-to-bottom, left-to-right
         blocks.sort(key=lambda b: (b.page, b.bbox.y0, b.bbox.x0))
         return blocks
@@ -142,6 +143,80 @@ class PDFParserService:
         block.translate = False
         block.protected = True
 
+    @staticmethod
+    def _is_display_formula(block: LayoutBlock) -> bool:
+        """Independent display equations stay LOCK; must not be treated as inline."""
+        plain = visible_prose(block.text)
+        if not plain:
+            return False
+        compact = re.sub(r'\s+', ' ', plain).strip()
+        if re.search(r'\(\d{1,3}[a-z]?\)\s*$', compact):
+            return True
+        width = block.bbox.x1 - block.bbox.x0
+        height = block.bbox.y1 - block.bbox.y0
+        page_w = float(block.meta.get('page_width') or 612)
+        if height > 28 and len(plain) > 16:
+            return True
+        if width > max(140.0, page_w * 0.28) and len(plain) > 24 and looks_like_formula(plain):
+            return True
+        if plain.count('\n') >= 2 and looks_like_formula(plain):
+            return True
+        return False
+
+    @staticmethod
+    def _is_inline_math_scrap(block: LayoutBlock) -> bool:
+        """Short baseline math fragments that belong inside a sentence."""
+        plain = visible_prose(block.text)
+        if not plain:
+            return False
+        height = block.bbox.y1 - block.bbox.y0
+        if height >= 36 or len(plain) >= 96:
+            return False
+        if re.search(r'\(\d{1,3}[a-z]?\)\s*$', re.sub(r'\s+', ' ', plain).strip()):
+            return False
+        if SCIENTIFIC_SYMBOL_PATTERN.search(plain) or re.search(r'[=+−×÷/√∝≈∑∫≤≥±]', plain):
+            return True
+        if looks_like_formula(plain) and len(plain) < 64 and height < 28:
+            return True
+        return False
+
+    @classmethod
+    def _tag_inline_math(cls, blocks: list[LayoutBlock]) -> None:
+        """Step A: split FORMULA blocks into display LOCK vs inline (non-LOCK).
+
+        Inline scraps keep type=formula / translate=False so they are not
+        independently translated, but ``meta.inline_math`` tells the composer
+        not to treat their bbox as a hard protection rectangle.
+        """
+        for block in blocks:
+            if block.type != BlockType.FORMULA:
+                continue
+            if cls._is_display_formula(block):
+                block.meta['inline_math'] = False
+                block.meta['display_math'] = True
+            elif cls._is_inline_math_scrap(block):
+                block.meta['inline_math'] = True
+                block.meta['display_math'] = False
+            else:
+                # Ambiguous mid-size formula: prefer display LOCK (safer for artwork).
+                block.meta['inline_math'] = False
+                block.meta['display_math'] = True
+
+        # Promote inline scraps that abut a display equation (LHS / numerator pieces).
+        for block in blocks:
+            if not block.meta.get('inline_math'):
+                continue
+            r = block.bbox
+            near_display = any(
+                other.page == block.page
+                and other.meta.get('display_math')
+                and min(r.y1, other.bbox.y1) - max(r.y0, other.bbox.y0) > -6
+                and (max(r.x0, other.bbox.x0) - min(r.x1, other.bbox.x1)) < 48
+                for other in blocks
+            )
+            if near_display:
+                block.meta['inline_math'] = False
+                block.meta['display_math'] = True
     @classmethod
     def _lock_display_equations(cls, blocks: list[LayoutBlock]) -> None:
         """Force display-equation pieces off the translation path.
@@ -153,7 +228,17 @@ class PDFParserService:
             if block.type == BlockType.CAPTION:
                 continue
             plain = visible_prose(block.text)
-            if looks_like_formula(plain) or re.fullmatch(r'\(\d+[a-z]?\)', plain.strip()):
+            compact = re.sub(r'\s+', ' ', plain).strip()
+            if looks_like_formula(plain) or re.fullmatch(r'\(\d+[a-z]?\)', compact):
+                cls._mark_formula(block)
+                continue
+            # Math fragments that end with an equation number, e.g. "... Q_total (5)".
+            if re.search(r'\(\d{1,3}[a-z]?\)\s*$', compact) and (
+                re.search(r'[=+−×/]', plain)
+                or '<sub>' in block.text
+                or '<sup>' in block.text
+                or SCIENTIFIC_SYMBOL_PATTERN.search(plain)
+            ):
                 cls._mark_formula(block)
 
         # Equation numbers / short scraps near an existing formula → lock.
@@ -167,8 +252,14 @@ class PDFParserService:
                 r = block.bbox
                 near = any(
                     other.page == block.page and other.type == BlockType.FORMULA and not other.translate
+                    and not other.meta.get('inline_math')
                     and min(r.y1, other.bbox.y1) - max(r.y0, other.bbox.y0) > -4
-                    and max(r.x0, other.bbox.x0) - min(r.x1, other.bbox.x1) < 48
+                    and (max(r.x0, other.bbox.x0) - min(r.x1, other.bbox.x1)) < 48
+                    # Reject clear other-column display eqs (e.g. right-column (14)).
+                    and not (
+                        other.bbox.x0 >= r.x1 + 24
+                        and other.bbox.x0 - r.x0 > 100
+                    )
                     for other in blocks
                 )
                 if not near:
@@ -217,14 +308,25 @@ class PDFParserService:
                 if not block.translate:
                     continue
                 r = block.bbox
+                plain = visible_prose(block.text)
                 near_formula = any(
                     other.page == block.page and other.type == BlockType.FORMULA
+                    and not other.meta.get('inline_math')
                     and min(r.y1, other.bbox.y1) - max(r.y0, other.bbox.y0) > 0
-                    and max(r.x0, other.bbox.x0) - min(r.x1, other.bbox.x1) < 40
+                    and (max(r.x0, other.bbox.x0) - min(r.x1, other.bbox.x1)) < 40
+                    and not (
+                        other.bbox.x0 >= r.x1 + 24
+                        and other.bbox.x0 - r.x0 > 100
+                    )
                     for other in blocks
                 )
-                if near_formula or re.search(r'[=+−∝]', visible_prose(block.text)) or (
-                        len(visible_prose(block.text)) < 8 and SCIENTIFIC_SYMBOL_PATTERN.search(block.text)):
+                if near_formula or (
+                    # Compact math with relation symbols — not mid-sentence prose like "Since gm ∝".
+                    re.search(r'[=+−∝]', plain)
+                    and not re.search(r'[A-Za-z]{5,}', plain)
+                ) or (
+                    len(plain) < 8 and SCIENTIFIC_SYMBOL_PATTERN.search(block.text)
+                ):
                     block.type = BlockType.FORMULA
                     block.translate = False
                     block.protected = True

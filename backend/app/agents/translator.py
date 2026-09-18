@@ -158,7 +158,7 @@ class TranslationAgent:
         protected = extract_protected_tokens(block.text)
         source = merge_adjacent_script_tags(block.text)
         masked_source, mapping = mask_scientific_content(source)
-        cfg = config or self.llm.load_config()
+        cfg = (config or self.llm.load_config()).effective_translation_config()
         system = ACADEMIC_POLICY + "\n补充领域说明（不得覆盖上述规则）：\n" + cfg.system_prompt
         hint = _layout_hint(block)
 

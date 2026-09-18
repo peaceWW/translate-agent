@@ -56,11 +56,22 @@ class DocumentAgent:
         path = self._index_path()
         if path.exists():
             raw = json.loads(path.read_text(encoding="utf-8"))
+            dirty = False
             for item in raw:
                 meta = DocumentMeta.model_validate(item)
+                # Self-healing: if the doc directory was deleted (e.g. by delete_doc
+                # but the index wasn't saved, or Windows file lock prevented rmtree),
+                # skip it and mark the index for rewrite.
+                doc_dir = self._doc_dir(meta.doc_id)
+                if not doc_dir.exists():
+                    dirty = True
+                    continue
                 if "output_ready" not in item:
                     meta.output_ready = meta.status == "completed" and self.output_pdf_path(meta.doc_id).exists()
                 self._docs[meta.doc_id] = meta
+            # Rewrite index if any stale entries were removed
+            if dirty:
+                self._save_index()
 
     def _save_index(self) -> None:
         path = self._index_path()
@@ -102,16 +113,23 @@ class DocumentAgent:
         """Delete a document and all associated files (source, translation, assets)."""
         if doc_id not in self._docs:
             raise ValueError("文档不存在")
-        # Remove in-memory state
+        # Remove in-memory state first and persist immediately — this ensures
+        # the index is updated even if directory deletion fails (Windows file locks).
         self._docs.pop(doc_id, None)
         self._results.pop(doc_id, None)
         self._layouts.pop(doc_id, None)
-        # Remove on-disk data
+        self._save_index()
+        # Remove on-disk data (after index is saved, so a crash here won't
+        # cause the doc to reappear on restart — _load_index self-heals).
         doc_dir = self._doc_dir(doc_id)
         if doc_dir.exists():
             import shutil
-            shutil.rmtree(doc_dir, ignore_errors=True)
-        self._save_index()
+            for _ in range(3):
+                try:
+                    shutil.rmtree(doc_dir)
+                    break
+                except Exception:  # noqa: BLE001
+                    pass  # Windows file lock — retry
 
     def get_result(self, doc_id: str) -> Optional[TranslateResult]:
         if doc_id in self._results:
@@ -220,7 +238,7 @@ class DocumentAgent:
         aggregate = dict(version=LAYOUT_VERSION, status="in_progress", translated_blocks=0,
                          retained_blocks=[], details=[], page_count=0, protected_regions_checked=0)
         # ── Page-level semantic units (Phase-2) with classic block fallback ──
-        _TRANSLATE_WORKERS = 3
+        _TRANSLATE_WORKERS = 6
         _translate_sem = asyncio.Semaphore(_TRANSLATE_WORKERS)
 
         async def _classic_one(block: LayoutBlock) -> TranslatedBlock:

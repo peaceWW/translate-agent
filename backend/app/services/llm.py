@@ -12,8 +12,18 @@ from app.models.schemas import LLMConfig
 class LLMService:
     """OpenAI-compatible LLM client. Works with OpenAI / Claude gateway / Qwen / local proxies."""
 
+    # Models that are dedicated translation models and do NOT support the
+    # "system" role — they only accept user/assistant messages.
+    _TRANSLATION_ONLY_MODELS = {
+        "qwen-mt-plus", "qwen-mt-turbo",   # Alibaba translation models
+        "alibaba-translate",
+    }
+
     def __init__(self) -> None:
         self.settings = get_settings()
+        # Persistent client pool keyed by (api_key, base_url) for HTTP connection
+        # reuse (keep-alive).  Avoids a new TCP+TLS handshake per translation call.
+        self._clients: dict[tuple[str, str], AsyncOpenAI] = {}
 
     def load_config(self) -> LLMConfig:
         path = self.settings.config_path
@@ -38,7 +48,28 @@ class LLMService:
 
     def _client(self, config: Optional[LLMConfig] = None) -> AsyncOpenAI:
         cfg = config or self.load_config()
-        return AsyncOpenAI(api_key=cfg.api_key or "EMPTY", base_url=cfg.base_url)
+        key = (cfg.api_key or "EMPTY", cfg.base_url)
+        if key not in self._clients:
+            self._clients[key] = AsyncOpenAI(api_key=key[0], base_url=key[1])
+        return self._clients[key]
+
+    def _build_messages(
+        self, model: str, user_prompt: str, system_prompt: Optional[str], default_system: str,
+    ) -> list[dict[str, str]]:
+        """Build chat messages, adapting for models that don't support 'system' role.
+
+        Dedicated translation models (e.g. qwen-mt-plus) only accept user/assistant
+        roles, so we merge the system prompt into the user message.
+        """
+        sys_text = system_prompt or default_system
+        if model in self._TRANSLATION_ONLY_MODELS:
+            # Merge system + user into a single user message
+            combined = f"{sys_text}\n\n{user_prompt}" if sys_text else user_prompt
+            return [{"role": "user", "content": combined}]
+        return [
+            {"role": "system", "content": sys_text},
+            {"role": "user", "content": user_prompt},
+        ]
 
     async def chat(
         self,
@@ -50,14 +81,12 @@ class LLMService:
     ) -> str:
         cfg = config or self.load_config()
         client = self._client(cfg)
+        messages = self._build_messages(cfg.model, user_prompt, system_prompt, cfg.system_prompt)
         resp = await client.chat.completions.create(
             model=cfg.model,
             temperature=0,
             max_tokens=cfg.max_tokens,
-            messages=[
-                {"role": "system", "content": system_prompt or cfg.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
         )
         choice = resp.choices[0]
         if choice.finish_reason != "stop":

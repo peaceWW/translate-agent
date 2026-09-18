@@ -46,8 +46,6 @@ async def delete_document(doc_id: str):
     meta = document_agent.get_meta(doc_id)
     if not meta:
         raise HTTPException(404, "文档不存在")
-    if meta.status in {"queued", "parsing", "translating", "qa", "composing"}:
-        raise HTTPException(409, "该文档正在翻译，无法删除")
     document_agent.delete_doc(doc_id)
     return {"ok": True, "doc_id": doc_id}
 

@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     port: int = 8080
     data_dir: Path = Path("./data")
 
-    llm_provider: str = "openai"
+    llm_provider: str = "deepseek"
     llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o"
+    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_model: str = "deepseek-chat"
     llm_max_tokens: int = 4096
 
     system_prompt: str = (

@@ -142,14 +142,23 @@ class PDFComposerService:
                     control_maps = font_control_maps(source[page_index])
                     originals = [b for b in layout_blocks if b.page == page_index + 1]
                     raw_blocks = [b for b in source[page_index].get_text('dict')['blocks'] if b['type'] == 0]
-                    # protected_artwork: true protected regions (figures, formulas, images,
-                    # drawings) that must never be overwritten by translation insertion.
-                    # protected: artwork + retained text blocks (used for initial overlap
-                    # check and obstacle computation, but NOT for second-pass check to
-                    # prevent cascading retention).
-                    protected_artwork = [fitz.Rect(b.bbox.x0,b.bbox.y0,b.bbox.x1,b.bbox.y1) for b in originals if not b.translate]
-                    formula_rects = [fitz.Rect(b.bbox.x0,b.bbox.y0,b.bbox.x1,b.bbox.y1)
-                                     for b in originals if b.type.value == 'formula' and not b.translate]
+                    # Display formulas are LOCK; inline_math scraps are not (Step A).
+                    def _is_display_lock(b: LayoutBlock) -> bool:
+                        return (
+                            b.type.value == 'formula'
+                            and not b.translate
+                            and not b.meta.get('inline_math')
+                        )
+
+                    protected_artwork = [
+                        fitz.Rect(b.bbox.x0, b.bbox.y0, b.bbox.x1, b.bbox.y1)
+                        for b in originals
+                        if not b.translate and not b.meta.get('inline_math')
+                    ]
+                    formula_rects = [
+                        fitz.Rect(b.bbox.x0, b.bbox.y0, b.bbox.x1, b.bbox.y1)
+                        for b in originals if _is_display_lock(b)
+                    ]
                     image_rects = [fitz.Rect(i['bbox']) for i in source[page_index].get_image_info()]
                     protected_artwork += image_rects
                     protected_artwork += visible_vector_regions(source[page_index])
@@ -160,11 +169,23 @@ class PDFComposerService:
                     absorb_members: dict[str, list[LayoutBlock]] = {}
                     for block in originals:
                         tb = translation_map.get(block.source_id)
-                        if not tb or not tb.translate:
+                        if not tb:
                             continue
                         target = _parse_absorb_target(tb.translated_text)
                         if target:
                             absorb_members.setdefault(target, []).append(block)
+
+                    # Absorbed members (incl. inline_math scraps) → redact glyphs only.
+                    for block in originals:
+                        tb = translation_map.get(block.source_id)
+                        if not tb or not _parse_absorb_target(tb.translated_text):
+                            continue
+                        rect = fitz.Rect(block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1)
+                        raw = min(raw_blocks, key=lambda b: sum(abs(a - c) for a, c in zip(b['bbox'], rect)), default=None)
+                        line_rects = [fitz.Rect(line['bbox']) for line in (raw or {}).get('lines', [])] or [rect]
+                        absorb_redacts.extend(line_rects)
+                        report.setdefault('absorbed_blocks', 0)
+                        report['absorbed_blocks'] += 1
 
                     for block in originals:
                         if not block.translate:
@@ -177,11 +198,8 @@ class PDFComposerService:
                                     and r.width < rect.width*.5 and r.height < rect.height
                                     and not any((r & line).get_area() > .5 for line in line_rects)]
                         tb = translation_map.get(block.source_id)
-                        # Absorbed FLOW continuation: redact English only; primary carries text.
+                        # Already handled as absorbed continuation / inline scrap.
                         if tb and _parse_absorb_target(tb.translated_text):
-                            absorb_redacts.extend(line_rects)
-                            report.setdefault('absorbed_blocks', 0)
-                            report['absorbed_blocks'] += 1
                             continue
                         reason = None
                         original_rect = fitz.Rect(block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1)

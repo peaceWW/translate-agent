@@ -78,15 +78,35 @@ class TranslateRequest(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: str = "openai"
-    model: str = "gpt-4o"
+    provider: str = "deepseek"
+    model: str = "deepseek-chat"
     api_key: str = ""
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str = "https://api.deepseek.com/v1"
     max_tokens: int = 4096
     system_prompt: str = (
         "你是一位专业的学术论文翻译助手。请准确翻译学术内容，"
         "严格保留公式、数字、单位、引用编号、图表编号与专有名词。"
     )
+    # Dedicated translation model — faster, translation-optimized.
+    # Falls back to the main model if not configured.
+    translation_model: str = ""          # e.g. "qwen-mt-plus"
+    translation_base_url: str = ""       # e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    translation_api_key: str = ""        # separate API key if needed
+
+    def effective_translation_config(self) -> "LLMConfig":
+        """Return a config suitable for translation calls.
+
+        If a dedicated translation model is configured, return a copy
+        pointing to it; otherwise fall back to the main model.
+        """
+        if self.translation_model:
+            return self.model_copy(update={
+                "provider": f"translation-{self.provider}",
+                "model": self.translation_model,
+                "base_url": self.translation_base_url or self.base_url,
+                "api_key": self.translation_api_key or self.api_key,
+            })
+        return self
 
 
 class QASummary(BaseModel):
