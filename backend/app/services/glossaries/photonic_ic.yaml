@@ -1,0 +1,292 @@
+# 光电集成电路 (Photonic Integrated Circuit) 领域白名单
+# 平铺形式 → LaTeX 还原映射
+# type: subscript = 带下标变量, superscript = 带上标变量, exclude = 排除项
+
+domain: photonic_integrated_circuit
+version: "1.0"
+
+entries:
+  # ═══════════════════════════════════════════
+  # 电路基本变量 (Circuit Variables)
+  # ═══════════════════════════════════════════
+
+  - flat: "VDD"
+    latex: "V_{\\text{DD}}"
+    desc: "drain supply voltage"
+    type: subscript
+
+  - flat: "VSS"
+    latex: "V_{\\text{SS}}"
+    desc: "source supply voltage"
+    type: subscript
+
+  - flat: "VGS"
+    latex: "V_{\\text{GS}}"
+    desc: "gate-source voltage"
+    type: subscript
+
+  - flat: "VDS"
+    latex: "V_{\\text{DS}}"
+    desc: "drain-source voltage"
+    type: subscript
+
+  - flat: "Vth"
+    latex: "V_{\\text{th}}"
+    desc: "threshold voltage"
+    type: subscript
+
+  - flat: "Vfb"
+    latex: "V_{\\text{fb}}"
+    desc: "flat-band voltage"
+    type: subscript
+
+  - flat: "Von"
+    latex: "V_{\\text{on}}"
+    desc: "turn-on voltage"
+    type: subscript
+
+  - flat: "Voc"
+    latex: "V_{\\text{oc}}"
+    desc: "open-circuit voltage"
+    type: subscript
+
+  - flat: "gm"
+    latex: "g_m"
+    desc: "transconductance"
+    type: subscript
+
+  - flat: "gd"
+    latex: "g_d"
+    desc: "output conductance"
+    type: subscript
+
+  - flat: "Ids"
+    latex: "I_{\\text{ds}}"
+    desc: "drain-source current"
+    type: subscript
+
+  - flat: "Id"
+    latex: "I_d"
+    desc: "drain current"
+    type: subscript
+
+  - flat: "Is"
+    latex: "I_s"
+    desc: "source current"
+    type: subscript
+
+  - flat: "Ig"
+    latex: "I_g"
+    desc: "gate current"
+    type: subscript
+
+  - flat: "Ipd"
+    latex: "I_{\\text{pd}}"
+    desc: "photodetector current"
+    type: subscript
+
+  - flat: "Iph"
+    latex: "I_{\\text{ph}}"
+    desc: "photocurrent"
+    type: subscript
+
+  - flat: "In"
+    latex: "I_n"
+    desc: "n-channel current or noise current"
+    type: subscript
+
+  # ═══════════════════════════════════════════
+  # 器件/电路参数 (Device & Circuit Parameters)
+  # ═══════════════════════════════════════════
+
+  - flat: "Cox"
+    latex: "C_{\\text{ox}}"
+    desc: "oxide capacitance per unit area"
+    type: subscript
+
+  - flat: "CIN"
+    latex: "C_{\\text{IN}}"
+    desc: "input capacitance"
+    type: subscript
+
+  - flat: "COUT"
+    latex: "C_{\\text{OUT}}"
+    desc: "output capacitance"
+    type: subscript
+
+  - flat: "Cgs"
+    latex: "C_{\\text{gs}}"
+    desc: "gate-source capacitance"
+    type: subscript
+
+  - flat: "Cgd"
+    latex: "C_{\\text{gd}}"
+    desc: "gate-drain capacitance"
+    type: subscript
+
+  - flat: "Cds"
+    latex: "C_{\\text{ds}}"
+    desc: "drain-source capacitance"
+    type: subscript
+
+  - flat: "RCIN"
+    latex: "\\text{RC}_{\\text{IN}}"
+    desc: "input RC time constant"
+    type: subscript
+
+  - flat: "RIN"
+    latex: "R_{\\text{IN}}"
+    desc: "input resistance"
+    type: subscript
+
+  - flat: "RL"
+    latex: "R_L"
+    desc: "load resistance"
+    type: subscript
+
+  - flat: "RS"
+    latex: "R_S"
+    desc: "source resistance"
+    type: subscript
+
+  - flat: "Rd"
+    latex: "R_d"
+    desc: "drain resistance"
+    type: subscript
+
+  - flat: "fclk"
+    latex: "f_{\\text{clk}}"
+    desc: "clock frequency"
+    type: subscript
+
+  - flat: "f3dB"
+    latex: "f_{3\\text{dB}}"
+    desc: "3 dB bandwidth"
+    type: subscript
+
+  - flat: "fT"
+    latex: "f_T"
+    desc: "transition frequency"
+    type: subscript
+
+  - flat: "fc"
+    latex: "f_c"
+    desc: "cutoff frequency"
+    type: subscript
+
+  # ═══════════════════════════════════════════
+  # 光电参数 (Photonic Parameters)
+  # ═══════════════════════════════════════════
+
+  - flat: "Popt"
+    latex: "P_{\\text{opt}}"
+    desc: "optical power"
+    type: subscript
+
+  - flat: "Pelec"
+    latex: "P_{\\text{elec}}"
+    desc: "electrical power"
+    type: subscript
+
+  - flat: "Rpd"
+    latex: "\\mathcal{R}_{\\text{pd}}"
+    desc: "photodetector responsivity"
+    type: subscript
+
+  - flat: "NEP"
+    latex: "\\text{NEP}"
+    desc: "noise equivalent power"
+    type: subscript
+
+  - flat: "ER"
+    latex: "\\text{ER}"
+    desc: "extinction ratio"
+    type: subscript
+
+  - flat: "IL"
+    latex: "\\text{IL}"
+    desc: "insertion loss"
+    type: subscript
+
+  - flat: "OSNR"
+    latex: "\\text{OSNR}"
+    desc: "optical signal-to-noise ratio"
+    type: subscript
+
+  # ═══════════════════════════════════════════
+  # 半导体参数 (Semiconductor Parameters)
+  # ═══════════════════════════════════════════
+
+  - flat: "Wn"
+    latex: "W_n"
+    desc: "n-channel width"
+    type: subscript
+
+  - flat: "Wp"
+    latex: "W_p"
+    desc: "p-channel width"
+    type: subscript
+
+  - flat: "Ln"
+    latex: "L_n"
+    desc: "n-channel length"
+    type: subscript
+
+  - flat: "Lp"
+    latex: "L_p"
+    desc: "p-channel length"
+    type: subscript
+
+  - flat: "μn"
+    latex: "\\mu_n"
+    desc: "electron mobility"
+    type: subscript
+
+  - flat: "μp"
+    latex: "\\mu_p"
+    desc: "hole mobility"
+    type: subscript
+
+  - flat: "ni"
+    latex: "n_i"
+    desc: "intrinsic carrier concentration"
+    type: subscript
+
+  - flat: "Cov"
+    latex: "C_{\\text{ov}}"
+    desc: "overlap capacitance"
+    type: subscript
+
+  # ═══════════════════════════════════════════
+  # 传输/信号参数 (Transmission & Signal)
+  # ═══════════════════════════════════════════
+
+  - flat: "S21"
+    latex: "S_{21}"
+    desc: "forward transmission coefficient"
+    type: subscript
+
+  - flat: "S11"
+    latex: "S_{11}"
+    desc: "input reflection coefficient"
+    type: subscript
+
+  - flat: "S22"
+    latex: "S_{22}"
+    desc: "output reflection coefficient"
+    type: subscript
+
+  - flat: "Zin"
+    latex: "Z_{\\text{in}}"
+    desc: "input impedance"
+    type: subscript
+
+  - flat: "Zout"
+    latex: "Z_{\\text{out}}"
+    desc: "output impedance"
+    type: subscript
+
+  - flat: "Qfactor"
+    latex: "Q"
+    desc: "quality factor"
+    type: subscript

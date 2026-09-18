@@ -1,0 +1,50 @@
+# 通用排除词表 — 跨领域共享的普通英文短词
+# 这些词在任何领域中都不是物理变量，正则粗筛可能误伤，需要排除。
+
+domain: _common
+version: "1.0"
+
+entries:
+  # ─── 冠词 ───
+  - {flat: "an", type: exclude, desc: "article"}
+  - {flat: "the", type: exclude, desc: "article"}
+
+  # ─── 介词 ───
+  - {flat: "in", type: exclude, desc: "preposition"}
+  - {flat: "on", type: exclude, desc: "preposition"}
+  - {flat: "at", type: exclude, desc: "preposition"}
+  - {flat: "of", type: exclude, desc: "preposition"}
+  - {flat: "to", type: exclude, desc: "preposition"}
+  - {flat: "by", type: exclude, desc: "preposition"}
+  - {flat: "up", type: exclude, desc: "preposition/adverb"}
+  - {flat: "as", type: exclude, desc: "preposition/conjunction"}
+  - {flat: "for", type: exclude, desc: "preposition"}
+
+  # ─── 连词 ───
+  - {flat: "or", type: exclude, desc: "conjunction"}
+  - {flat: "if", type: exclude, desc: "conjunction"}
+  - {flat: "and", type: exclude, desc: "conjunction"}
+  - {flat: "but", type: exclude, desc: "conjunction"}
+
+  # ─── 代词 ───
+  - {flat: "it", type: exclude, desc: "pronoun"}
+  - {flat: "he", type: exclude, desc: "pronoun"}
+  - {flat: "me", type: exclude, desc: "pronoun"}
+  - {flat: "us", type: exclude, desc: "pronoun"}
+  - {flat: "we", type: exclude, desc: "pronoun"}
+
+  # ─── 动词 ───
+  - {flat: "is", type: exclude, desc: "verb"}
+  - {flat: "be", type: exclude, desc: "verb"}
+  - {flat: "do", type: exclude, desc: "verb"}
+  - {flat: "go", type: exclude, desc: "verb"}
+  - {flat: "am", type: exclude, desc: "verb"}
+  - {flat: "no", type: exclude, desc: "adverb/determiner"}
+  - {flat: "so", type: exclude, desc: "adverb/conjunction"}
+  - {flat: "not", type: exclude, desc: "adverb"}
+
+  # ─── 其他常见短词 ───
+  - {flat: "ok", type: exclude, desc: "colloquial"}
+  - {flat: "Id", type: exclude, desc: "identifier (context-dependent)"}
+  - {flat: "IP", type: exclude, desc: "internet protocol"}
+  - {flat: "IT", type: exclude, desc: "information technology"}

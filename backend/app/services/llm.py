@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import base64
 import json
-from typing import Optional
+import mimetypes
+from pathlib import Path
+from typing import Optional, Sequence, Union
 
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
 from app.models.schemas import LLMConfig
+
+ImageInput = Union[bytes, str, Path]
 
 
 class LLMService:
@@ -55,7 +60,7 @@ class LLMService:
 
     def _build_messages(
         self, model: str, user_prompt: str, system_prompt: Optional[str], default_system: str,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict]:
         """Build chat messages, adapting for models that don't support 'system' role.
 
         Dedicated translation models (e.g. qwen-mt-plus) only accept user/assistant
@@ -69,6 +74,42 @@ class LLMService:
         return [
             {"role": "system", "content": sys_text},
             {"role": "user", "content": user_prompt},
+        ]
+
+    @staticmethod
+    def _image_data_url(image: ImageInput) -> str:
+        if isinstance(image, bytes):
+            raw = image
+            mime = "image/png"
+        else:
+            path = Path(image)
+            raw = path.read_bytes()
+            mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        b64 = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    def _build_vision_messages(
+        self,
+        model: str,
+        user_prompt: str,
+        images: Sequence[ImageInput],
+        system_prompt: Optional[str],
+        default_system: str,
+    ) -> list[dict]:
+        content: list[dict] = [{"type": "text", "text": user_prompt}]
+        for image in images:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": self._image_data_url(image)},
+            })
+        sys_text = system_prompt or default_system
+        if model in self._TRANSLATION_ONLY_MODELS:
+            # Rare for VL models, but keep the same role adaptation.
+            merged = [{"type": "text", "text": f"{sys_text}\n\n{user_prompt}"}] + content[1:]
+            return [{"role": "user", "content": merged}]
+        return [
+            {"role": "system", "content": sys_text},
+            {"role": "user", "content": content},
         ]
 
     async def chat(
@@ -94,6 +135,38 @@ class LLMService:
         text = (choice.message.content or "").strip()
         if not text:
             raise ValueError("模型返回空内容，请重试")
+        return text
+
+    async def chat_with_images(
+        self,
+        user_prompt: str,
+        images: Sequence[ImageInput],
+        *,
+        system_prompt: Optional[str] = None,
+        config: Optional[LLMConfig] = None,
+    ) -> str:
+        """Multimodal chat: text prompt plus one or more images (bytes or file paths)."""
+        if not images:
+            raise ValueError("chat_with_images 需要至少一张图片")
+        cfg = config or self.load_config()
+        client = self._client(cfg)
+        messages = self._build_vision_messages(
+            cfg.model, user_prompt, images, system_prompt, cfg.system_prompt,
+        )
+        resp = await client.chat.completions.create(
+            model=cfg.model,
+            temperature=0,
+            max_tokens=cfg.max_tokens,
+            messages=messages,
+        )
+        choice = resp.choices[0]
+        if choice.finish_reason not in ("stop", "end_turn", None):
+            # Some gateways omit finish_reason; only fail on known truncations.
+            if choice.finish_reason == "length":
+                raise ValueError("视觉模型输出被截断，请增大 max_tokens 后重试")
+        text = (choice.message.content or "").strip()
+        if not text:
+            raise ValueError("视觉模型返回空内容，请重试")
         return text
 
     async def test_connection(self, config: Optional[LLMConfig] = None) -> dict:

@@ -12,6 +12,10 @@ const defaultConfig: LLMConfig = {
   translation_model: '',
   translation_base_url: '',
   translation_api_key: '',
+  vision_model: '',
+  vision_base_url: '',
+  vision_api_key: '',
+  vision_scale: 2,
 }
 
 const presets = [
@@ -28,6 +32,13 @@ const translationPresets = [
   { label: 'DeepSeek', translation_model: 'deepseek-chat', translation_base_url: 'https://api.deepseek.com/v1' },
   { label: '智谱 GLM-4', translation_model: 'glm-4-plus', translation_base_url: 'https://open.bigmodel.cn/api/paas/v4' },
   { label: 'Kimi', translation_model: 'moonshot-v1-8k', translation_base_url: 'https://api.moonshot.cn/v1' },
+]
+
+const visionPresets = [
+  { label: '与推理模型相同', vision_model: '', vision_base_url: '' },
+  { label: '通义千问 VL', vision_model: 'qwen-vl-max', vision_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: 'GPT-4o', vision_model: 'gpt-4o', vision_base_url: 'https://api.openai.com/v1' },
+  { label: '智谱 GLM-4V', vision_model: 'glm-4v-plus', vision_base_url: 'https://open.bigmodel.cn/api/paas/v4' },
 ]
 
 export default function ModelsPage() {
@@ -192,6 +203,69 @@ export default function ModelsPage() {
                 value={config.translation_api_key}
                 onChange={(e) => setConfig({ ...config, translation_api_key: e.target.value })}
                 placeholder="留空则使用推理模型 Key"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
+          <h3 style={{ margin: '0 0 4px' }}>视觉翻译模型</h3>
+          <p className="muted small" style={{ margin: '0 0 12px' }}>
+            页级视觉翻译主路径：整页截图 + 区块对齐。配置 VL 模型（如 qwen-vl-max / gpt-4o）后启用；未配置时回退文本翻译。
+          </p>
+          <label>快捷预设</label>
+          <div className="preset-row">
+            {visionPresets.map((p) => (
+              <button
+                key={p.label}
+                className="btn ghost"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    vision_model: p.vision_model,
+                    vision_base_url: p.vision_base_url,
+                  }))
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="form-grid">
+            <label>
+              视觉模型名称
+              <input
+                value={config.vision_model ?? ''}
+                onChange={(e) => setConfig({ ...config, vision_model: e.target.value })}
+                placeholder="如 qwen-vl-max，留空则按主模型名猜测"
+              />
+            </label>
+            <label>
+              视觉模型 API Base URL
+              <input
+                value={config.vision_base_url ?? ''}
+                onChange={(e) => setConfig({ ...config, vision_base_url: e.target.value })}
+                placeholder="留空则使用推理模型地址"
+              />
+            </label>
+            <label className="full">
+              视觉模型 API Key
+              <input
+                type="password"
+                value={config.vision_api_key ?? ''}
+                onChange={(e) => setConfig({ ...config, vision_api_key: e.target.value })}
+                placeholder="留空则使用推理模型 Key"
+              />
+            </label>
+            <label>
+              页图渲染倍率
+              <input
+                type="number"
+                step={0.5}
+                min={1}
+                max={3}
+                value={config.vision_scale ?? 2}
+                onChange={(e) => setConfig({ ...config, vision_scale: Number(e.target.value) })}
               />
             </label>
           </div>

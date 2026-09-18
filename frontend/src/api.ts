@@ -59,6 +59,10 @@ export type LLMConfig = {
   translation_model: string
   translation_base_url: string
   translation_api_key: string
+  vision_model: string
+  vision_base_url: string
+  vision_api_key: string
+  vision_scale: number
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

@@ -92,6 +92,12 @@ class LLMConfig(BaseModel):
     translation_model: str = ""          # e.g. "qwen-mt-plus"
     translation_base_url: str = ""       # e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1"
     translation_api_key: str = ""        # separate API key if needed
+    # Vision / multimodal model for page-level visual translation.
+    # Falls back to the main model if not configured.
+    vision_model: str = ""               # e.g. "qwen-vl-max", "gpt-4o"
+    vision_base_url: str = ""
+    vision_api_key: str = ""
+    vision_scale: float = 2.0            # page render DPI multiplier
 
     def effective_translation_config(self) -> "LLMConfig":
         """Return a config suitable for translation calls.
@@ -107,6 +113,23 @@ class LLMConfig(BaseModel):
                 "api_key": self.translation_api_key or self.api_key,
             })
         return self
+
+    def effective_vision_config(self) -> "LLMConfig":
+        """Return a config suitable for multimodal / vision translation calls."""
+        if self.vision_model:
+            return self.model_copy(update={
+                "provider": f"vision-{self.provider}",
+                "model": self.vision_model,
+                "base_url": self.vision_base_url or self.base_url,
+                "api_key": self.vision_api_key or self.api_key,
+            })
+        return self
+
+    def has_vision_model(self) -> bool:
+        """True when a dedicated vision model is configured or the main model looks multimodal."""
+        name = (self.vision_model or self.model or "").lower()
+        markers = ("vl", "vision", "gpt-4o", "gpt-4.1", "gemini", "claude-3", "claude-4", "qwen2.5-vl")
+        return bool(self.vision_model) or any(m in name for m in markers)
 
 
 class QASummary(BaseModel):

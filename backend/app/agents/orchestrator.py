@@ -11,6 +11,7 @@ import aiofiles
 
 from app.agents.translator import TranslationAgent
 from app.agents.page_repair import PageRepairAgent
+from app.agents.vision_translator import VisionTranslationAgent
 from app.core.config import get_settings
 from app.models.schemas import (
     ChatRequest,
@@ -23,6 +24,7 @@ from app.models.schemas import (
     TranslatedBlock,
 )
 from app.services.llm import LLMService
+from app.services.page_renderer import PageRenderer
 from app.services.pdf_composer import PDFComposerService, LAYOUT_VERSION
 from app.services.pdf_parser import PDFParserService
 from app.services.qa import QAService
@@ -30,14 +32,16 @@ from app.services.structured_translator import StructuredTranslator
 
 
 class DocumentAgent:
-    """Orchestrates: parse → translate → QA → compose."""
+    """Orchestrates: parse → vision translate → QA → compose."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
         self.llm = LLMService()
         self.parser = PDFParserService()
         self.composer = PDFComposerService()
+        self.renderer = PageRenderer()
         self.translator = TranslationAgent(self.llm)
+        self.vision = VisionTranslationAgent(self.llm)
         self.structured = StructuredTranslator(self.llm)
         self.page_repair = PageRepairAgent(self.llm)
         self.qa = QAService()
@@ -236,10 +240,13 @@ class DocumentAgent:
         if not any(b.translate and b.text.strip() for b in blocks):
             raise ValueError("未识别到可翻译文本，暂不支持扫描版 PDF")
         aggregate = dict(version=LAYOUT_VERSION, status="in_progress", translated_blocks=0,
-                         retained_blocks=[], details=[], page_count=0, protected_regions_checked=0)
-        # ── Page-level semantic units (Phase-2) with classic block fallback ──
+                         retained_blocks=[], details=[], page_count=0, protected_regions_checked=0,
+                         translation_mode="vision")
+        # ── Page-level vision translation with classic text fallback ──
         _TRANSLATE_WORKERS = 6
         _translate_sem = asyncio.Semaphore(_TRANSLATE_WORKERS)
+        # Prefer vision whenever a VL model is configured / detected; else text pipeline.
+        use_vision = config.has_vision_model()
 
         async def _classic_one(block: LayoutBlock) -> TranslatedBlock:
             async with _translate_sem:
@@ -256,23 +263,83 @@ class DocumentAgent:
                         translate=True,
                     )
 
+        async def _fallback_failed(page_blocks: list[LayoutBlock],
+                                   page_results: list[TranslatedBlock]) -> list[TranslatedBlock]:
+            by_id = {tb.source_id: tb for tb in page_results}
+            need = [
+                b for b in page_blocks
+                if b.translate and (b.text or "").strip()
+                and by_id.get(b.source_id)
+                and by_id[b.source_id].translated_text.startswith("[翻译失败:")
+            ]
+            if not need:
+                return page_results
+            repaired = await asyncio.gather(*[_classic_one(b) for b in need])
+            for tb in repaired:
+                by_id[tb.source_id] = tb
+            order = {b.source_id: i for i, b in enumerate(page_blocks)}
+            return sorted(by_id.values(), key=lambda t: order.get(t.source_id, 10_000))
+
+        run_dir = self._doc_dir(doc_id) / "runs" / (meta.translation_run_id or "default")
+        render_dir = run_dir / "page-images"
+        scale = float(getattr(config, "vision_scale", 2.0) or 2.0)
+
         for page_number in range(1, meta.page_count + 1):
             meta.current_page = page_number
             meta.status = "translating"
             page_blocks = [b for b in blocks if b.page == page_number]
-            total = max(sum(b.translate for b in page_blocks), 1)
-            meta.message = (
-                f"正在语义翻译第 {page_number}/{meta.page_count} 页"
-                f"（结构化 segments + {_TRANSLATE_WORKERS} 线程回退）"
-            )
-            self._save_index()
-            page_results = await self.structured.translate_page_units(
-                page_blocks,
-                source_lang=req.source_lang,
-                target_lang=req.target_lang,
-                config=config,
-                translate_block_fn=_classic_one,
-            )
+            total = max(sum(1 for b in page_blocks if b.translate and (b.text or "").strip()), 1)
+
+            if use_vision:
+                meta.message = (
+                    f"正在视觉翻译第 {page_number}/{meta.page_count} 页"
+                    f"（页图 + 区块对齐，失败将回退文本翻译）"
+                )
+                self._save_index()
+                image_path = render_dir / f"page-{page_number}.png"
+                await asyncio.to_thread(
+                    self.renderer.render_page, pdf_path, page_number, image_path, scale=scale,
+                )
+                page_results = await self.vision.translate_page(
+                    page_blocks,
+                    image_path,
+                    source_lang=req.source_lang,
+                    target_lang=req.target_lang,
+                    config=config,
+                )
+                vision_ok = sum(
+                    1 for tb in page_results
+                    if tb.translate and tb.qa.get("vision") is True
+                )
+                aggregate.setdefault("vision_blocks", 0)
+                aggregate["vision_blocks"] += vision_ok
+                failed_before = sum(
+                    1 for tb in page_results if tb.translated_text.startswith("[翻译失败:")
+                )
+                if failed_before:
+                    meta.message = (
+                        f"第 {page_number}/{meta.page_count} 页：视觉漏译 {failed_before} 段，"
+                        f"正在文本回退…"
+                    )
+                    self._save_index()
+                    page_results = await _fallback_failed(page_blocks, page_results)
+                    aggregate.setdefault("text_fallbacks", 0)
+                    aggregate["text_fallbacks"] += failed_before
+            else:
+                aggregate["translation_mode"] = "text"
+                meta.message = (
+                    f"正在文本翻译第 {page_number}/{meta.page_count} 页"
+                    f"（未配置视觉模型，使用结构化 segments）"
+                )
+                self._save_index()
+                page_results = await self.structured.translate_page_units(
+                    page_blocks,
+                    source_lang=req.source_lang,
+                    target_lang=req.target_lang,
+                    config=config,
+                    translate_block_fn=_classic_one,
+                )
+
             failed = sum(
                 1 for tb in page_results
                 if tb.translated_text.startswith('[翻译失败:')

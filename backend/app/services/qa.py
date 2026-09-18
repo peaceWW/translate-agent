@@ -14,7 +14,12 @@ from app.services.protection import (
 
 
 class QAService:
-    """Three-layer fidelity checks: programmatic → cross-reference → (optional) semantic flags."""
+    """Three-layer fidelity checks: programmatic → cross-reference → (optional) semantic flags.
+
+    Scientific-symbol counts are soft under vision translation: flattened PDF source text
+    often disagrees with visually-correct translations (subscripts, √, etc.). Hard failures
+    remain for missing paragraphs, Fig/Table refs, and critical quantities/citations.
+    """
 
     def check(self, blocks: list[TranslatedBlock]) -> QASummary:
         details: list[str] = []
@@ -42,9 +47,16 @@ class QAService:
             target = merge_adjacent_script_tags(b.translated_text)
             ok, missing = compare_protected_tokens(source, target)
             sym_ok, added, removed = compare_scientific_symbols(source, target)
+            vision_ok = b.qa.get("vision") is True
             if not sym_ok:
-                formula_ok = False
-                details.append(f'科学符号增删或改写 [{b.source_id}]: {format_symbol_diff(added, removed)}')
+                # Vision path: treat symbol count drift as soft warning (source is flattened).
+                # Text path: still hard-fail so KEEP/mask regressions stay visible.
+                msg = f'科学符号增删或改写 [{b.source_id}]: {format_symbol_diff(added, removed)}'
+                if vision_ok:
+                    details.append(f"软告警: {msg}")
+                else:
+                    formula_ok = False
+                    details.append(msg)
             if not ok:
                 for token in missing:
                     if re.search(r"\[\d+|Fig\.|Table|Eq\.", token, re.I):

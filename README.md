@@ -21,16 +21,19 @@ Frontend (React)
   ↓
 Agent Layer (FastAPI)
   · DocumentAgent 编排
-  · TranslationAgent 翻译
+  · VisionTranslationAgent 页级视觉翻译（主路径）
+  · TranslationAgent 文本回退
   · QAService 校验
   ↓
-LLM Layer (OpenAI 兼容，可配置 GPT / Qwen / 本地模型)
+LLM Layer（OpenAI 兼容；视觉模型如 qwen-vl-max / gpt-4o）
   ↓
 Tools & Data
-  · PyMuPDF 解析 / 合成
+  · PyMuPDF 解析 / 页渲染 / 合成
   · 术语库 JSON
   · 本地文件存储
 ```
+
+主路径说明见 [docs/v6-视觉大模型翻译方案.md](docs/v6-视觉大模型翻译方案.md)。
 
 ## 目录结构
 
